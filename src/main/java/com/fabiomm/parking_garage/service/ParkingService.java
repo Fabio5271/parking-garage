@@ -70,6 +70,10 @@ public class ParkingService {
         ParkingSpot spot = spotRepository.findByCoordinates(event.getLat(), event.getLng())
                 .orElseThrow(() -> new NotFoundException("Unable to park: Parking spot not found on location"));
 
+        if (spot.isOccupied()) {
+            throw new OccupancyException("Unable to park: Spot is already occupied");
+        }
+
         ParkingSession session = sessionRepository.findByLicensePlateAndExitTimeIsNull(event.getLicensePlate())
                 .orElseThrow(() -> new NotFoundException(
                         "Unable to park: No active parking session for license plate " + event.getLicensePlate()));
@@ -81,9 +85,6 @@ public class ParkingService {
 
         if (sector.getOccupiedCount() >= sector.getCapacity()) {
             throw new OccupancyException("Unable to park: Sector '" + sectorName + "' is already full");
-        }
-        if (spot.isOccupied()) {
-            throw new OccupancyException("Unable to park: Spot is already occupied");
         }
 
         spot.setOccupied(true);
@@ -106,21 +107,23 @@ public class ParkingService {
                 .findByLicensePlateAndExitTimeIsNull(event.getLicensePlate())
                 .orElseThrow(() -> new NotFoundException(
                         "Error exiting garage: No active parking session for license plate '" + event.getLicensePlate() + "'"));
+
         if (event.getExitTime().isBefore(session.getEntryTime())) {
             throw new InvalidClientDataException("Error exiting garage: Cannot exit at a time/date earlier than the entry time");
         }
         session.setExitTime(event.getExitTime());
-        session.setChargedAmount(calculatePrice(session));
 
         if (session.getSpot() != null) {
             ParkingSpot spot = session.getSpot();
             spot.setOccupied(false);
             spotRepository.save(spot);
-        }
-        if (session.getSector() != null) {
+
             Sector sector = sectorRepository.findBySector(session.getSector())
                     .orElseThrow(() -> new MissingDataException(
                             "Error exiting garage: Sector " + session.getSector() + " not found"));
+
+            session.setChargedAmount(calculatePrice(session)); // Depends on sector
+
             sector.decreaseOccupied();
             sectorRepository.save(sector);
         }
@@ -128,6 +131,7 @@ public class ParkingService {
         sessionRepository.save(session);
     }
 
+    @Transactional(readOnly = true)
     public RevenueResponse getRevenue(RevenueRequest request) {
         Double amount = sessionRepository.sumRevenueBySectorAndDate(request.getSector(), request.getDate());
         if (amount == null) {
@@ -157,7 +161,7 @@ public class ParkingService {
 
         double multiplier = getDynamicMultiplier(sector);
 
-        long hours = (long) Math.ceil(minutes / 60.0); // Considerar a primeira hora completa no total
+        long hours = (long) Math.ceil(minutes / 60.0); // Considera a primeira hora completa no total
         BigDecimal price = BigDecimal.valueOf(hours * basePrice * multiplier);
         return price.setScale(2, RoundingMode.HALF_UP);
     }
@@ -165,7 +169,7 @@ public class ParkingService {
     private double getDynamicMultiplier(Sector sector) {
         int totalSpots = sector.getCapacity();
         int occupied = sector.getOccupiedCount();
-        double occupancy = totalSpots > 0 ? (double) occupied / totalSpots * 100 : 0;
+        double occupancy = (double) occupied / totalSpots * 100;
 
         if (occupancy < 25) {
             return 0.9;
@@ -177,4 +181,14 @@ public class ParkingService {
             return 1.25;
         }
     };
+
+    // ==================== FOR TESTS ====================
+
+    BigDecimal calculatePriceForTest(ParkingSession session) {
+        return calculatePrice(session);
+    }
+
+    double getDynamicMultiplierForTest(Sector sector) {
+        return getDynamicMultiplier(sector);
+    }
 }

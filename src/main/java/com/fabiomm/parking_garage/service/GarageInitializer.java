@@ -2,6 +2,8 @@ package com.fabiomm.parking_garage.service;
 
 import java.math.BigDecimal;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
@@ -21,6 +23,8 @@ public class GarageInitializer {
     private final SectorRepository sectorRepository;
     private final ParkingSpotRepository spotRepository;
     private final RestTemplate restTemplate;
+
+    private static final Logger log = LoggerFactory.getLogger(GarageInitializer.class);
 
     @EventListener(ApplicationReadyEvent.class)
     public void initializeGarage() {
@@ -50,7 +54,8 @@ public class GarageInitializer {
                 }
             }
         } catch (Exception e) {
-            System.err.println("Failed to initialize garage: " + e.getMessage());
+            log.error("Failed to get garage configuration: " + e.getMessage());
+            log.warn("Proceeding using previous database data (may be empty)");
         }
     }
 }
